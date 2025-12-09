@@ -1,6 +1,6 @@
 /**
- * Enfuce Credit Card Lifecycle Templates
- * Real-world credit card processing flow with advanced Numscript features.
+ * Transaction Templates and Chart of Accounts Presets
+ * All templates are based on real-world Formance use cases.
  */
 
 export interface TransactionTemplate {
@@ -8,367 +8,459 @@ export interface TransactionTemplate {
   name: string;
   description: string;
   icon: string;
-  category: "setup" | "authorization" | "clearing" | "billing" | "settlement";
+  category: "setup" | "authorization" | "clearing" | "billing" | "settlement" | "refund" | "onramp" | "offramp";
+  chartPreset?: string;
   prompt: string;
   exampleNumscript: string;
 }
 
 export const TRANSACTION_TEMPLATES: TransactionTemplate[] = [
-  // Setup
+  // ============================================================
+  // CARD ACQUIRING - Templates
+  // ============================================================
+  
   {
-    id: "ASSIGN_CREDIT_LIMIT",
-    name: "Assign Credit Limit",
-    description: "Create credit limit for a new cardholder using CREDIT/2 asset",
+    id: "CARD_AUTH",
+    name: "Card Authorization",
+    description: "Credit client wallet from acquirer on card authorization",
     icon: "credit-card",
-    category: "setup",
-    prompt: "Assign a $5,000 credit limit to cardholder account 12345 from platform acme_bank. Card number is 4111-XXXX-1234, approval reference CR-2024-001.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $credit_limit
-  account $account_id
-  account $platform_name
-  string $card_number
-  string $credit_approval_reference
-}
-send [CREDIT/2 $credit_limit](
-  source = @platform:$platform_name:credit_grants allowing unbounded overdraft
-  destination = @cardholder:$account_id:credit_line
+    category: "authorization",
+    chartPreset: "card-acquiring",
+    prompt: `1. Process a $75 EUR card authorization from acquirer stripe
+2. Credit the funds to client user_123
+3. Set metadata: type = card_authorization, authorization_id = AUTH-2024-001`,
+    exampleNumscript: `send [EUR/2 7500] (
+  source = @acquirers:stripe:main allowing unbounded overdraft
+  destination = @clients:user_123:main
 )
-set_tx_meta("card_number", $card_number)
-set_tx_meta("credit_approval_reference", $credit_approval_reference)`,
+set_tx_meta("type", "card_authorization")
+set_tx_meta("authorization_id", "AUTH-2024-001")`,
+  },
+  {
+    id: "CARD_REFUND",
+    name: "Card Refund",
+    description: "Debit client and credit acquirer for refund",
+    icon: "rotate-ccw",
+    category: "refund",
+    chartPreset: "card-acquiring",
+    prompt: `1. Process a $50 EUR refund from client user_123
+2. Send the funds back to acquirer stripe
+3. Set metadata: type = refund, refund_id = REF-001, original_authorization_id = AUTH-2024-001`,
+    exampleNumscript: `send [EUR/2 5000] (
+  source = @clients:user_123:main
+  destination = @acquirers:stripe:main
+)
+set_tx_meta("type", "refund")
+set_tx_meta("refund_id", "REF-001")
+set_tx_meta("original_authorization_id", "AUTH-2024-001")`,
+  },
+  {
+    id: "ACQUIRER_SETTLEMENT",
+    name: "Acquirer Settlement",
+    description: "Settle acquirer balance from bank with fee handling",
+    icon: "banknote",
+    category: "settlement",
+    chartPreset: "card-acquiring",
+    prompt: `1. Settle $9,700 EUR net from bank iban_main to acquirer stripe
+2. Platform acme covers $300 EUR in processing fees
+3. Set metadata: type = acquirer_settlement, settlement_ref = SETTLE-2024-001`,
+    exampleNumscript: `send [EUR/2 970000] (
+  source = @banks:iban_main:main allowing unbounded overdraft
+  destination = @acquirers:stripe:main
+)
+send [EUR/2 30000] (
+  source = @platform:acme:fees allowing unbounded overdraft
+  destination = @acquirers:stripe:main
+)
+set_tx_meta("type", "acquirer_settlement")
+set_tx_meta("settlement_ref", "SETTLE-2024-001")`,
+  },
+  {
+    id: "CHARGEBACK",
+    name: "Chargeback",
+    description: "Process chargeback with fee handling",
+    icon: "alert-triangle",
+    category: "refund",
+    chartPreset: "card-acquiring",
+    prompt: `1. Process a $100 EUR chargeback from client user_123 to acquirer stripe
+2. Platform acme pays $15 EUR chargeback fee to acquirer
+3. Set metadata: type = chargeback, chargeback_id = CB-001, original_authorization_id = AUTH-2024-001`,
+    exampleNumscript: `send [EUR/2 10000] (
+  source = @clients:user_123:main allowing unbounded overdraft
+  destination = @acquirers:stripe:main
+)
+send [EUR/2 1500] (
+  source = @platform:acme:chargeback_fees allowing unbounded overdraft
+  destination = @acquirers:stripe:main
+)
+set_tx_meta("type", "chargeback")
+set_tx_meta("chargeback_id", "CB-001")
+set_tx_meta("original_authorization_id", "AUTH-2024-001")`,
   },
 
-  // Authorization
+  // ============================================================
+  // CARD ISSUING (Debit) - Templates
+  // ============================================================
+  
   {
-    id: "AUTHORIZATION_STANDARD",
-    name: "Standard Authorization",
-    description: "Authorization request - validates balance and creates pending hold",
+    id: "AUTH_HOLD",
+    name: "Authorization Hold",
+    description: "Move funds from main to hold account",
     icon: "shield-check",
     category: "authorization",
-    prompt: "Authorize $150 EUR for cardholder 12345. Authorization ID is AUTH-98765, card 4111-XXXX-1234. Transaction details: Amazon purchase.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $amount
-  account $account_id
-  number $credit_line = get_amount(balance(@cardholder:$account_id:credit_line, CREDIT/2))
-  number $current = get_amount(overdraft(@cardholder:$account_id:current, $asset))
-  number $credit_limit = $credit_line - $current 
-  string $authorization_id
-  string $card_number
-  string $trx_details
-}
-send [$asset $amount] (
-  source = @cardholder:$account_id:available allowing overdraft up to [$asset $credit_limit]
-  destination = @cardholder:$account_id:pending:$authorization_id
+    chartPreset: "card-issuing",
+    prompt: `1. Create a $100 USD authorization hold for cardholder acc_123
+2. Move funds from main to hold account AUTH-001
+3. Allow overdraft up to $50 if needed
+4. Set metadata: type = authorization, authorization_id = AUTH-001`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @cardholder:acc_123:main allowing overdraft up to [USD/2 5000]
+  destination = @cardholder:acc_123:hold:AUTH-001
 )
-set_tx_meta("authorization_id", $authorization_id)
-set_tx_meta("card_number", $card_number)
-set_tx_meta("trx_details", $trx_details)
-set_tx_meta("transaction_type", "authorization")
-set_tx_meta("interest_bearing", "false")`,
+set_tx_meta("type", "authorization")
+set_tx_meta("authorization_id", "AUTH-001")`,
   },
   {
-    id: "AUTHORIZATION_ATM_WITH_FEE",
-    name: "ATM Authorization with Fee",
-    description: "ATM withdrawal with 1.5% markup fee, interest-bearing",
-    icon: "banknote",
-    category: "authorization",
-    prompt: "ATM authorization for $200 EUR for cardholder 12345 with 1.5% fee ($3). Auth ID ATM-55555, card 4111-XXXX-1234.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $amount
-  number $fee_amount
-  account $account_id
-  number $credit_line = get_amount(balance(@cardholder:$account_id:credit_line, CREDIT/2))
-  number $current = get_amount(overdraft(@cardholder:$account_id:current, EUR/2))
-  number $credit_limit = $credit_line - $current 
-  string $authorization_id
-  string $card_number
-  string $trx_details
-}
-send [$asset $amount] (
-  source = @cardholder:$account_id:available allowing overdraft up to [$asset $credit_limit]
-  destination = @cardholder:$account_id:pending:$authorization_id
-)
-send [$asset $fee_amount] (
-  source = @cardholder:$account_id:available allowing overdraft up to [$asset $credit_limit]
-  destination = @cardholder:$account_id:fees:markup
-)
-set_tx_meta("authorization_id", $authorization_id)
-set_tx_meta("transaction_type", "authorization_atm")
-set_tx_meta("fee_rate", "1.5%")
-set_tx_meta("interest_bearing", "true")`,
-  },
-  {
-    id: "AUTHORIZATION_REVERSAL",
+    id: "AUTH_REVERSAL",
     name: "Authorization Reversal",
-    description: "Release authorization hold back to available balance",
+    description: "Release held funds back to main",
     icon: "rotate-ccw",
     category: "authorization",
-    prompt: "Reverse authorization AUTH-98765 for $150 EUR for cardholder 12345. Reversal ID REV-11111.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $amount
-  account $account_id
-  string $authorization_id
-  string $reversal_id
-  string $trx_details
-}
-send [$asset $amount] (
-  source = @cardholder:$account_id:pending:$authorization_id
-  destination = @cardholder:$account_id:available
+    chartPreset: "card-issuing",
+    prompt: `1. Reverse authorization AUTH-001 for cardholder acc_123
+2. Release $100 USD from hold back to main account
+3. Set metadata: type = authorization_reversal, authorization_id = AUTH-001, reversal_id = REV-001`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @cardholder:acc_123:hold:AUTH-001
+  destination = @cardholder:acc_123:main
 )
-set_tx_meta("authorization_id", $authorization_id)
-set_tx_meta("reversal_id", $reversal_id)
-set_tx_meta("transaction_type", "authorization_reversal")`,
+set_tx_meta("type", "authorization_reversal")
+set_tx_meta("authorization_id", "AUTH-001")
+set_tx_meta("reversal_id", "REV-001")`,
   },
-
-  // Clearing
   {
-    id: "CLEARING_STANDARD",
-    name: "Standard Clearing",
-    description: "Clearing file received - closes auth and books cleared transaction",
+    id: "HOLD_REVERSAL_FULL",
+    name: "Full Hold Release",
+    description: "Release all remaining funds from expired hold",
+    icon: "rotate-ccw",
+    category: "authorization",
+    chartPreset: "card-issuing",
+    prompt: `1. Release all remaining funds from expired auth AUTH-001
+2. Move entire balance (*) from hold to cardholder acc_123 main
+3. Set metadata: type = hold_expiry, authorization_id = AUTH-001`,
+    exampleNumscript: `send [USD/2 *] (
+  source = @cardholder:acc_123:hold:AUTH-001
+  destination = @cardholder:acc_123:main
+)
+set_tx_meta("type", "hold_expiry")
+set_tx_meta("authorization_id", "AUTH-001")`,
+  },
+  {
+    id: "PRESENTMENT",
+    name: "Presentment/Clearing",
+    description: "Move from hold to scheme liability",
     icon: "check-circle",
     category: "clearing",
-    prompt: "Clear $148.50 EUR for cardholder 12345, auth AUTH-98765. Clearing ref CLR-77777, scheme visa_eu.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $cleared_amount
-  account $account_id
-  string $authorization_id
-  number $credit_line = get_amount(balance(@cardholder:$account_id:credit_line, CREDIT/2))
-  number $current = get_amount(overdraft(@cardholder:$account_id:current, $asset))
-  number $credit_limit = $credit_line - $current           
-  string $clearing_reference
-  account $scheme_id
-  string $trx_details
-}
-send [$asset *] (
-  source = @cardholder:$account_id:pending:$authorization_id
-  destination = @cardholder:$account_id:available
+    chartPreset: "card-issuing",
+    prompt: `1. Clear $100 USD from cardholder acc_123 hold AUTH-001
+2. Send to scheme visa
+3. Set metadata: type = presentment, authorization_id = AUTH-001, presentment_id = PRES-001`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @cardholder:acc_123:hold:AUTH-001
+  destination = @schemes:visa:main
 )
-send [$asset $cleared_amount] (
-  source = @cardholder:$account_id:available allowing overdraft up to [$asset $credit_limit]
-  destination = @cardholder:$account_id:current
-)     
-send [$asset $cleared_amount] (
-  source = @cardholder:$account_id:current
-  destination = @schemes:$scheme_id:main
-)
-set_tx_meta("authorization_id", $authorization_id)
-set_tx_meta("clearing_reference", $clearing_reference)
-set_tx_meta("transaction_type", "clearing")`,
-  },
-
-  // Billing
-  {
-    id: "BILLING_CYCLE_CLOSE",
-    name: "Close Billing Cycle",
-    description: "End of billing period - generate invoice from current cycle",
-    icon: "file-text",
-    category: "billing",
-    prompt: "Close billing cycle for cardholder 12345 with $1,250 EUR due. Invoice INV-2024-001, platform acme_bank, billing period 2024-01, due date 2024-02-15.",
-    exampleNumscript: `vars {
-  asset $asset
-  account $account_id
-  number $due_amount = get_amount(overdraft(@cardholder:$account_id:available,$asset))
-  number $credit_line = get_amount(balance(@cardholder:$account_id:credit_line, CREDIT/2))
-  number $interest_amount = get_amount(balance(@cardholder:$account_id:interest:posted, $asset))
-  string $invoice_id
-  string $platform_name
-  string $billing_period
-  string $due_date
-}
-send [$asset $due_amount] (
-  source = @cardholder:$account_id:current allowing overdraft up to [$asset $credit_line]
-  destination = @cardholder:$account_id:available
-)
-send [$asset $due_amount] (
-  source = @cardholder:$account_id:billed:$invoice_id allowing unbounded overdraft
-  destination = @cardholder:$account_id:billed
-)
-send [$asset $interest_amount] (
-  source= @cardholder:$account_id:billed:$invoice_id allowing unbounded overdraft
-  destination = @cardholder:$account_id:billed
-)    
-send [$asset *] (
-  source = @cardholder:$account_id:fees:markup
-  destination = @platform:$platform_name:revenue
-)
-set_tx_meta("invoice_id", $invoice_id)
-set_tx_meta("billing_period", $billing_period)
-set_tx_meta("due_date", $due_date)
-set_tx_meta("transaction_type", "billing_cycle_close")`,
+set_tx_meta("type", "presentment")
+set_tx_meta("authorization_id", "AUTH-001")
+set_tx_meta("presentment_id", "PRES-001")`,
   },
   {
-    id: "INVOICE_PAID",
-    name: "Invoice Payment",
-    description: "Invoice payment received - clear AR/AP and current receivable",
-    icon: "circle-check",
-    category: "billing",
-    prompt: "Payment of $1,250 EUR received for cardholder 12345, invoice INV-2024-001. Bank account bank_main, payment ref PAY-99999, platform acme_bank.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $amount
-  account $platform_name
-  account $account_id
-  number $open_interest_amount = get_amount(overdraft(@platform:$platform_name:interest:$account_id, $asset))
-  string $invoice_id
-  account $bank_number
-  string $payment_reference
-}
-send [$asset $amount](
-  source = @banks:$bank_number:main allowing unbounded overdraft
-  destination = {
-    max [$asset $open_interest_amount] to @platform:$platform_name:interest:$account_id
-    remaining to @cardholder:$account_id:current 
-  }
+    id: "PRESENTMENT_WITH_TIP",
+    name: "Presentment with Tip",
+    description: "Clear with additional tip amount from main",
+    icon: "check-circle",
+    category: "clearing",
+    chartPreset: "card-issuing",
+    prompt: `1. Clear $100 USD from auth hold AUTH-001 to scheme visa
+2. Add $20 USD tip from cardholder acc_123 main balance to scheme visa
+3. Set metadata: type = presentment_with_tip, authorization_id = AUTH-001, presentment_id = PRES-001, tip_amount = 2000`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @cardholder:acc_123:hold:AUTH-001
+  destination = @schemes:visa:main
 )
-send [$asset $amount](
-  source = @cardholder:$account_id:billed
-  destination = @cardholder:$account_id:billed:$invoice_id
-)           
-set_tx_meta("invoice_id", $invoice_id)
-set_tx_meta("payment_reference", $payment_reference)`,
+send [USD/2 2000] (
+  source = @cardholder:acc_123:main
+  destination = @schemes:visa:main
+)
+set_tx_meta("type", "presentment_with_tip")
+set_tx_meta("authorization_id", "AUTH-001")
+set_tx_meta("presentment_id", "PRES-001")
+set_tx_meta("tip_amount", "2000")`,
   },
   {
-    id: "INVOICE_OVERDUE",
-    name: "Invoice Overdue",
-    description: "Invoice past due - move to overdue and start interest accrual",
+    id: "OFFLINE_PRESENTMENT",
+    name: "Offline Transaction",
+    description: "Presentment without prior authorization",
+    icon: "check-circle",
+    category: "clearing",
+    chartPreset: "card-issuing",
+    prompt: `1. Process $50 USD offline transaction for cardholder acc_123
+2. Send to scheme visa (allow unbounded overdraft since no prior auth)
+3. Set metadata: type = offline_presentment, presentment_id = PRES-OFFLINE-001, authorization_mode = offline`,
+    exampleNumscript: `send [USD/2 5000] (
+  source = @cardholder:acc_123:main allowing unbounded overdraft
+  destination = @schemes:visa:main
+)
+set_tx_meta("type", "offline_presentment")
+set_tx_meta("presentment_id", "PRES-OFFLINE-001")
+set_tx_meta("authorization_mode", "offline")`,
+  },
+  {
+    id: "REFUND_AUTHORIZATION",
+    name: "Refund Authorization",
+    description: "Credit to pending refund account",
+    icon: "rotate-ccw",
+    category: "refund",
+    chartPreset: "card-issuing",
+    prompt: `1. Authorize $50 USD refund for cardholder acc_123
+2. Credit from scheme visa to pending refund account REF-AUTH-001
+3. Set metadata: type = refund_authorization, refund_auth_id = REF-AUTH-001, refund_status = pending`,
+    exampleNumscript: `send [USD/2 5000] (
+  source = @schemes:visa:main allowing unbounded overdraft
+  destination = @cardholder:acc_123:refund:pending:REF-AUTH-001
+)
+set_tx_meta("type", "refund_authorization")
+set_tx_meta("refund_auth_id", "REF-AUTH-001")
+set_tx_meta("refund_status", "pending")`,
+  },
+  {
+    id: "REFUND_POSTING",
+    name: "Refund Posting",
+    description: "Release refund to cardholder main",
+    icon: "rotate-ccw",
+    category: "refund",
+    chartPreset: "card-issuing",
+    prompt: `1. Post $50 USD refund REF-AUTH-001 for cardholder acc_123
+2. Move from pending refund to main account
+3. Set metadata: type = refund_posting, refund_auth_id = REF-AUTH-001, refund_posting_id = POST-001, refund_status = completed`,
+    exampleNumscript: `send [USD/2 5000] (
+  source = @cardholder:acc_123:refund:pending:REF-AUTH-001
+  destination = @cardholder:acc_123:main
+)
+set_tx_meta("type", "refund_posting")
+set_tx_meta("refund_auth_id", "REF-AUTH-001")
+set_tx_meta("refund_posting_id", "POST-001")
+set_tx_meta("refund_status", "completed")`,
+  },
+  {
+    id: "CHARGEBACK_ACCEPTANCE",
+    name: "Chargeback Acceptance",
+    description: "Credit cardholder from scheme chargeback",
     icon: "alert-triangle",
-    category: "billing",
-    prompt: "Mark invoice INV-2024-001 as overdue for cardholder 12345. Amount $1,250 EUR, overdue date 2024-02-16.",
-    exampleNumscript: `vars {
-  asset $asset
-  account $account_id
-  string $invoice_id
-  string $overdue_date
-  number $invoice_amount = get_amount(overdraft(@cardholder:$account_id:billed:$invoice_id, EUR/2))
-}
-send [$asset $invoice_amount] (
-  source = @cardholder:$account_id:overdue allowing unbounded overdraft
-  destination = @cardholder:$account_id:billed:$invoice_id
+    category: "refund",
+    chartPreset: "card-issuing",
+    prompt: `1. Accept chargeback CB-001 for $100 USD
+2. Credit cardholder acc_123 from scheme visa chargeback account
+3. Set metadata: type = chargeback_acceptance, chargeback_id = CB-001, original_presentment_id = PRES-001, chargeback_status = accepted`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @schemes:visa:chargeback allowing unbounded overdraft
+  destination = @cardholder:acc_123:main
 )
-set_tx_meta("invoice_id", $invoice_id)
-set_tx_meta("overdue_date", $overdue_date)
-set_tx_meta("transaction_type", "invoice_overdue")`,
+set_tx_meta("type", "chargeback_acceptance")
+set_tx_meta("chargeback_id", "CB-001")
+set_tx_meta("original_presentment_id", "PRES-001")
+set_tx_meta("chargeback_status", "accepted")`,
   },
   {
-    id: "OVERDUE_INVOICE_PAYMENT",
-    name: "Overdue Invoice Payment",
-    description: "Overdue invoice payment - stop interest accrual",
-    icon: "circle-dollar-sign",
-    category: "billing",
-    prompt: "Receive $1,300 EUR payment for overdue invoice INV-2024-001, cardholder 12345. Bank bank_main, platform acme_bank, ref PAY-LATE-001.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $amount
-  number $open_interest_amount = get_amount(overdraft(@platform:$platform_name:interest:$account_id, $asset))
-  account $account_id
-  account $bank_number
-  account $platform_name
-  string $payment_reference
-  string $invoice_id
-}
-send [$asset $amount] (
-  source = @banks:$bank_number:main allowing unbounded overdraft
-  destination = {
-    max [$asset $open_interest_amount] to @platform:$platform_name:interest:$account_id
-    remaining to @cardholder:$account_id:current
-  }
+    id: "SECOND_PRESENTMENT",
+    name: "Second Presentment",
+    description: "Chargeback reversal - debit cardholder",
+    icon: "alert-triangle",
+    category: "refund",
+    chartPreset: "card-issuing",
+    prompt: `1. Reverse chargeback CB-001 via second presentment
+2. Debit $100 USD from cardholder acc_123 to scheme visa
+3. Allow unbounded overdraft
+4. Set metadata: type = second_presentment, chargeback_id = CB-001, second_presentment_id = SP-001, chargeback_status = reversed`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @cardholder:acc_123:main allowing unbounded overdraft
+  destination = @schemes:visa:main
 )
-send [$asset $amount](
-  source = @cardholder:$account_id:billed
-  destination = @cardholder:$account_id:overdue
-)   
-set_tx_meta("payment_reference", $payment_reference)
-set_tx_meta("invoice_id", $invoice_id)
-set_tx_meta("transaction_type", "invoice_payment")`,
+set_tx_meta("type", "second_presentment")
+set_tx_meta("chargeback_id", "CB-001")
+set_tx_meta("second_presentment_id", "SP-001")
+set_tx_meta("chargeback_status", "reversed")`,
   },
   {
-    id: "INTEREST_ACCRUAL_POST",
-    name: "Post Interest",
-    description: "Post accumulated overdue interest to current cycle",
-    icon: "percent",
-    category: "billing",
-    prompt: "Post $45.50 EUR interest for cardholder 12345, platform acme_bank. Interest period 2024-01, calculated at 18% APR on $1,250 overdue.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $interest_amount
-  account $account_id
-  account $platform_name
-  string $interest_period
-  string $calculation_details
-}
-send [$asset $interest_amount] (
-  source = @cardholder:$account_id:interest:accrued allowing unbounded overdraft
-  destination = @cardholder:$account_id:interest:posted
+    id: "STIP_ADVICE",
+    name: "STIP Advice",
+    description: "Stand-In Processing during issuer downtime",
+    icon: "alert-triangle",
+    category: "clearing",
+    chartPreset: "card-issuing",
+    prompt: `1. Process STIP advice for $75 USD (approved during issuer downtime)
+2. Debit cardholder acc_123 to scheme visa
+3. Allow unbounded overdraft
+4. Set metadata: type = stip_advice, stip_advice_id = STIP-001, authorization_mode = stand_in`,
+    exampleNumscript: `send [USD/2 7500] (
+  source = @cardholder:acc_123:main allowing unbounded overdraft
+  destination = @schemes:visa:main
 )
-send [$asset $interest_amount] (
-  source = @cardholder:$account_id:overdue allowing unbounded overdraft
-  destination = @cardholder:$account_id:interest:accrued
-)
-send [$asset $interest_amount] (
-  source = @platform:$platform_name:interest:$account_id allowing unbounded overdraft
-  destination = @platform:$platform_name:revenue
-)
-set_tx_meta("interest_period", $interest_period)
-set_tx_meta("interest_amount", $interest_amount)
-set_tx_meta("transaction_type", "interest_posting")`,
+set_tx_meta("type", "stip_advice")
+set_tx_meta("stip_advice_id", "STIP-001")
+set_tx_meta("authorization_mode", "stand_in")`,
   },
 
-  // Settlement
+  // ============================================================
+  // STABLECOIN ISSUANCE - Templates
+  // ============================================================
+  
   {
-    id: "SCHEME_SETTLEMENT_PREPARE",
-    name: "Scheme Settlement Prepare",
-    description: "Daily settlement from scheme to bank - preparation",
-    icon: "arrow-right-left",
-    category: "settlement",
-    prompt: "Prepare settlement of $50,000 EUR from scheme visa_eu to bank bank_main. Settlement ref SETT-2024-001, date 2024-01-15.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $settlement_amount
-  account $bank_number
-  account $scheme_id
-  string $settlement_reference
-  string $settlement_date
-}
-send [$asset $settlement_amount] (
-  source = @schemes:$scheme_id:main
-  destination = @banks:$bank_number:payout:$settlement_reference
+    id: "ONRAMP_PAYMENT_CREDIT",
+    name: "On-Ramp: Payment & Credit",
+    description: "Receive fiat payment, credit stablecoin to user",
+    icon: "banknote",
+    category: "onramp",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Receive $100 USD payment from PSP stripe to pivot account
+2. Credit 100 USDC (USDC/6 = 100000000 units) from pivot to client user_123
+3. Set metadata: type = payment_stablecoin_credit, authorization_id = AUTH-PSP-001, client_id = user_123`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @psp:stripe:main allowing unbounded overdraft
+  destination = @platform:pivot:stablecoin_issuance
 )
-set_tx_meta("settlement_reference", $settlement_reference)
-set_tx_meta("settlement_date", $settlement_date)
-set_tx_meta("transaction_type", "scheme_settlement")`,
+send [USDC/6 100000000] (
+  source = @platform:pivot:stablecoin_issuance allowing unbounded overdraft
+  destination = @clients:user_123:stablecoin
+)
+set_tx_meta("type", "payment_stablecoin_credit")
+set_tx_meta("authorization_id", "AUTH-PSP-001")
+set_tx_meta("client_id", "user_123")`,
   },
   {
-    id: "SCHEME_SETTLEMENT_CONFIRM",
-    name: "Scheme Settlement Confirm",
-    description: "Daily settlement from scheme to bank - confirmation",
-    icon: "check-check",
-    category: "settlement",
-    prompt: "Confirm settlement of $50,000 EUR from payout to bank main. Settlement ref SETT-2024-001, date 2024-01-15.",
-    exampleNumscript: `vars {
-  asset $asset
-  number $settlement_amount
-  account $bank_number
-  account $scheme_id
-  string $settlement_reference
-  string $settlement_date
-}
-send [$asset $settlement_amount] (
-  source = @banks:$bank_number:payout:$settlement_reference
-  destination = @banks:$bank_number:main
+    id: "MINT_INSTRUCTION",
+    name: "On-Ramp: Mint Instruction",
+    description: "Track blockchain mint in-flight",
+    icon: "banknote",
+    category: "onramp",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Initiate mint of 100 USDC (USDC/6 = 100000000 units) on ethereum
+2. Track as in-flight from mint_in_flight to pivot account
+3. Set metadata: type = mint_instruction, mint_tx_hash = 0xabc123def456, network = ethereum`,
+    exampleNumscript: `send [USDC/6 100000000] (
+  source = @blockchain:ethereum:mint_in_flight allowing unbounded overdraft
+  destination = @platform:pivot:stablecoin_issuance
 )
-set_tx_meta("settlement_reference", $settlement_reference)
-set_tx_meta("settlement_date", $settlement_date)
-set_tx_meta("transaction_type", "scheme_settlement")`,
+set_tx_meta("type", "mint_instruction")
+set_tx_meta("mint_tx_hash", "0xabc123def456")
+set_tx_meta("network", "ethereum")`,
+  },
+  {
+    id: "MINT_CONFIRMATION",
+    name: "On-Ramp: Mint Confirmation",
+    description: "Confirm mint, add to circulating supply",
+    icon: "check-circle",
+    category: "onramp",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Confirm mint of 100 USDC on ethereum at block 12345678
+2. Clear in-flight by moving from circulating to mint_in_flight
+3. Set metadata: type = mint_confirmation, mint_tx_hash = 0xabc123def456, block_number = 12345678, network = ethereum`,
+    exampleNumscript: `send [USDC/6 100000000] (
+  source = @blockchain:ethereum:circulating allowing unbounded overdraft
+  destination = @blockchain:ethereum:mint_in_flight
+)
+set_tx_meta("type", "mint_confirmation")
+set_tx_meta("mint_tx_hash", "0xabc123def456")
+set_tx_meta("block_number", "12345678")
+set_tx_meta("network", "ethereum")`,
+  },
+  {
+    id: "PSP_SETTLEMENT",
+    name: "On-Ramp: PSP Settlement",
+    description: "Settle net amount from bank, platform covers fees",
+    icon: "banknote",
+    category: "settlement",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Settle $97 USD net from bank iban_main to pivot account
+2. Platform covers $3 USD payment fee to PSP stripe
+3. Set metadata: type = psp_settlement, settlement_ref = SETTLE-PSP-001`,
+    exampleNumscript: `send [USD/2 9700] (
+  source = @banks:iban_main:main allowing unbounded overdraft
+  destination = @platform:pivot:stablecoin_issuance
+)
+send [USD/2 300] (
+  source = @platform:expenses:payment_fees allowing unbounded overdraft
+  destination = @psp:stripe:main
+)
+set_tx_meta("type", "psp_settlement")
+set_tx_meta("settlement_ref", "SETTLE-PSP-001")`,
+  },
+  {
+    id: "BURN_INSTRUCTION",
+    name: "Off-Ramp: Burn Instruction",
+    description: "Lock user's stablecoins for burn",
+    icon: "banknote",
+    category: "offramp",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Lock 100 USDC (USDC/6 = 100000000 units) from client user_123 for withdrawal
+2. Move to burn_in_flight on ethereum network
+3. Set metadata: type = burn_instruction, burn_tx_hash = 0xdef789, client_id = user_123, network = ethereum`,
+    exampleNumscript: `send [USDC/6 100000000] (
+  source = @clients:user_123:stablecoin
+  destination = @blockchain:ethereum:burn_in_flight
+)
+set_tx_meta("type", "burn_instruction")
+set_tx_meta("burn_tx_hash", "0xdef789")
+set_tx_meta("client_id", "user_123")
+set_tx_meta("network", "ethereum")`,
+  },
+  {
+    id: "BURN_CONFIRMATION",
+    name: "Off-Ramp: Burn Confirmation",
+    description: "Confirm burn, release fiat from backing",
+    icon: "check-circle",
+    category: "offramp",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Confirm burn of 100 USDC on ethereum at block 12345680
+2. Clear burn_in_flight to circulating
+3. Release $100 USD from backing_stablecoins to pending_withdrawal
+4. Set metadata: type = burn_confirmation, burn_tx_hash = 0xdef789, block_number = 12345680, client_id = user_123`,
+    exampleNumscript: `send [USDC/6 100000000] (
+  source = @blockchain:ethereum:burn_in_flight
+  destination = @blockchain:ethereum:circulating
+)
+send [USD/2 10000] (
+  source = @platform:reserves:backing_stablecoins
+  destination = @platform:reserves:pending_withdrawal
+)
+set_tx_meta("type", "burn_confirmation")
+set_tx_meta("burn_tx_hash", "0xdef789")
+set_tx_meta("block_number", "12345680")
+set_tx_meta("client_id", "user_123")`,
+  },
+  {
+    id: "FIAT_WITHDRAWAL",
+    name: "Off-Ramp: Fiat Withdrawal",
+    description: "Initiate bank transfer to client",
+    icon: "banknote",
+    category: "offramp",
+    chartPreset: "stablecoin-issuance",
+    prompt: `1. Withdraw $100 USD for client user_123
+2. Move from pending_withdrawal to bank iban_main withdrawal account TRF-001
+3. Set metadata: type = fiat_withdrawal, transfer_ref = TRF-001, client_id = user_123`,
+    exampleNumscript: `send [USD/2 10000] (
+  source = @platform:reserves:pending_withdrawal
+  destination = @banks:iban_main:withdrawal:TRF-001
+)
+set_tx_meta("type", "fiat_withdrawal")
+set_tx_meta("transfer_ref", "TRF-001")
+set_tx_meta("client_id", "user_123")`,
   },
 ];
 
-/**
- * Chart of Accounts Presets - Updated for Credit Card Processing
- */
+// ============================================================
+// Chart of Accounts Presets
+// ============================================================
+
 export interface ChartPreset {
   id: string;
   name: string;
@@ -379,44 +471,45 @@ export interface ChartPreset {
 
 export const CHART_PRESETS: ChartPreset[] = [
   {
-    id: "credit-card-issuing",
-    name: "Credit Card Issuing",
-    description: "Full credit card lifecycle - Enfuce model",
-    icon: "credit-card",
-    yaml: `# Credit Card Issuing - Enfuce Model
-# Complete lifecycle: setup, auth, clearing, billing, settlement
+    id: "stablecoin-issuance",
+    name: "Stablecoin Issuance",
+    description: "On-ramp/off-ramp with PSP and blockchain",
+    icon: "banknote",
+    yaml: `# Stablecoin Issuance Platform
+# On-ramp (fiat→stablecoin), Off-ramp (stablecoin→fiat)
 
-cardholders:
-  description: "Cardholder accounts"
+psp:
+  description: "Payment Service Provider accounts (assets)"
   paths:
-    available: "cardholder:$id:available"
-    current: "cardholder:$id:current"
-    credit_line: "cardholder:$id:credit_line"
-    pending: "cardholder:$id:pending:$auth_id"
-    billed: "cardholder:$id:billed"
-    billed_invoice: "cardholder:$id:billed:$invoice_id"
-    overdue: "cardholder:$id:overdue"
-    fees_markup: "cardholder:$id:fees:markup"
-    interest_accrued: "cardholder:$id:interest:accrued"
-    interest_posted: "cardholder:$id:interest:posted"
-
-platform:
-  description: "Platform/Issuer accounts"
-  paths:
-    credit_grants: "platform:$platform:credit_grants"
-    revenue: "platform:$platform:revenue"
-    interest: "platform:$platform:interest:$account_id"
-
-schemes:
-  description: "Card scheme accounts (Visa, MC)"
-  paths:
-    main: "schemes:$scheme:main"
+    main: "psp:$psp_id:main"
 
 banks:
-  description: "Bank settlement accounts"
+  description: "Bank reserve accounts (assets)"
   paths:
-    main: "banks:$bank:main"
-    payout: "banks:$bank:payout:$ref"
+    main: "banks:$bank_id:main"
+    withdrawal: "banks:$bank_id:withdrawal:$transfer_ref"
+
+blockchain:
+  description: "Blockchain supply tracking (liabilities)"
+  paths:
+    circulating: "blockchain:$network:circulating"
+    mint_in_flight: "blockchain:$network:mint_in_flight"
+    burn_in_flight: "blockchain:$network:burn_in_flight"
+
+clients:
+  description: "Client stablecoin balances (liabilities)"
+  paths:
+    stablecoin: "clients:$client_id:stablecoin"
+
+platform:
+  description: "Platform operational accounts"
+  paths:
+    pivot: "platform:pivot:stablecoin_issuance"
+    gas_fees: "platform:expenses:gas_fees"
+    payment_fees: "platform:expenses:payment_fees"
+    transaction_fees: "platform:revenue:transaction_fees"
+    backing: "platform:reserves:backing_stablecoins"
+    pending_withdrawal: "platform:reserves:pending_withdrawal"
 
 world:
   description: "Unlimited source"
@@ -425,35 +518,34 @@ world:
 `,
   },
   {
-    id: "marketplace",
-    name: "Marketplace",
-    description: "Buyers, sellers, escrow, splits",
-    icon: "store",
-    yaml: `# Marketplace Chart of Accounts
+    id: "card-acquiring",
+    name: "Card Acquiring",
+    description: "Payment processing with acquirers and client wallets",
+    icon: "credit-card",
+    yaml: `# Card Acquiring / Payment Processing
+# Real-time authorization with settlement flow
 
-customers:
-  description: "Buyer accounts"
+acquirers:
+  description: "Acquirer authorization promises (assets)"
   paths:
-    wallet: "customer:$id:wallet"
-    pending: "customer:$id:pending"
+    main: "acquirers:$acquirer_id:main"
 
-sellers:
-  description: "Seller/merchant accounts"
+banks:
+  description: "Bank settlement accounts (assets)"
   paths:
-    available: "seller:$id:available"
-    pending: "seller:$id:pending"
-    payouts: "seller:$id:payouts"
+    main: "banks:$bank_id:main"
 
-escrow:
-  description: "Order escrow accounts"
+clients:
+  description: "Client wallet balances (liabilities)"
   paths:
-    holding: "escrow:order:$id"
+    main: "clients:$client_id:main"
 
 platform:
-  description: "Platform accounts"
+  description: "Platform operational accounts"
   paths:
-    fees: "platform:revenue:fees"
-    refunds: "platform:expenses:refunds"
+    fees: "platform:$platform:fees"
+    revenue: "platform:$platform:revenue"
+    chargeback_fees: "platform:$platform:chargeback_fees"
 
 world:
   description: "Unlimited source"
@@ -462,29 +554,37 @@ world:
 `,
   },
   {
-    id: "simple-wallets",
-    name: "Simple Wallets",
-    description: "Basic wallet system with fees",
-    icon: "wallet",
-    yaml: `# Simple Wallet System
+    id: "card-issuing",
+    name: "Card Issuing (Debit)",
+    description: "Full card issuing with auth holds, presentments, refunds",
+    icon: "credit-card",
+    yaml: `# Card Issuing (Debit Card Model)
+# Authorization holds, presentments, refunds, chargebacks
 
-users:
-  description: "User wallet accounts"
+cardholder:
+  description: "Cardholder accounts"
   paths:
-    available: "user:$id:available"
-    pending: "user:$id:pending"
-    cashback: "user:$id:cashback"
+    main: "cardholder:$account_id:main"
+    hold: "cardholder:$account_id:hold:$authorization_id"
+    refund_pending: "cardholder:$account_id:refund:pending:$refund_auth_id"
 
-merchants:
-  description: "Merchant accounts"
+schemes:
+  description: "Card scheme liability accounts"
   paths:
-    main: "merchant:$id:main"
+    main: "schemes:$scheme_id:main"
+    chargeback: "schemes:$scheme_id:chargeback"
+
+banks:
+  description: "Bank reserve accounts (assets)"
+  paths:
+    main: "banks:$bank_id:main"
 
 platform:
-  description: "Platform accounts"
+  description: "Platform operational accounts"
   paths:
-    fees: "platform:fees"
-    revenue: "platform:revenue"
+    fees: "platform:$platform:fees"
+    revenue: "platform:$platform:revenue"
+    chargeback_fees: "platform:$platform:chargeback_fees"
 
 world:
   description: "Unlimited source"
@@ -493,15 +593,3 @@ world:
 `,
   },
 ];
-
-export function getChartPreset(id: string): ChartPreset | undefined {
-  return CHART_PRESETS.find((preset) => preset.id === id);
-}
-
-export function getTransactionTemplate(id: string): TransactionTemplate | undefined {
-  return TRANSACTION_TEMPLATES.find((template) => template.id === id);
-}
-
-export function getTemplatesByCategory(category: TransactionTemplate["category"]): TransactionTemplate[] {
-  return TRANSACTION_TEMPLATES.filter((t) => t.category === category);
-}

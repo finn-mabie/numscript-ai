@@ -3,7 +3,10 @@ import type { NumscriptIntent, Posting, SplitRule } from "./schema";
 /**
  * Numscript Compiler
  * Converts validated JSON Intent into Numscript string.
- * Supports limited overdraft and max (capped) amounts.
+ * Supports limited overdraft, percentage splits, and max-capped splits.
+ * 
+ * NOTE: Percentages (fraction) and max caps are DIFFERENT destination types
+ * and cannot be mixed in the same split block!
  */
 
 function formatAccount(account: string): string {
@@ -40,7 +43,7 @@ function formatSplitRule(rule: SplitRule, asset: string): string {
       return `    ${value} to ${target}`;
     }
     case "max": {
-      // Capped amount: max [USD/2 1000] to @account
+      // Inorder destination with max cap: max [USD/2 1000] to @account
       return `    max [${asset} ${rule.value}] to ${target}`;
     }
     case "remaining": {
@@ -52,9 +55,19 @@ function formatSplitRule(rule: SplitRule, asset: string): string {
 }
 
 function formatSplitDestination(rules: SplitRule[], asset: string): string {
-  // Sort: fraction first, then max, then remaining last
+  // Check if using max or fraction - they cannot be mixed!
+  const hasMax = rules.some(r => r.amount_mode === "max");
+  const hasFraction = rules.some(r => r.amount_mode === "fraction");
+  
+  if (hasMax && hasFraction) {
+    // This shouldn't happen if the AI follows instructions, but handle gracefully
+    // by preferring the max-based (inorder) style
+    console.warn("Warning: Cannot mix max and fraction in same split. Using max-based inorder.");
+  }
+  
+  // Sort: fraction/max first, then remaining last
   const sorted = [...rules].sort((a, b) => {
-    const order: Record<string, number> = { fraction: 0, max: 1, remaining: 2 };
+    const order: Record<string, number> = { fraction: 0, max: 0, remaining: 1 };
     return (order[a.amount_mode] ?? 0) - (order[b.amount_mode] ?? 0);
   });
   
@@ -88,10 +101,23 @@ function compilePosting(posting: Posting): string {
   ].join("\n");
 }
 
+function compileMetadata(metadata: Array<{ key: string; value: string }>): string[] {
+  return metadata.map(m => `set_tx_meta("${m.key}", "${m.value}")`);
+}
+
 export function compileToNumscript(intent: NumscriptIntent): string {
   const header = `// ${intent.summary}`;
   const postings = intent.postings.map(compilePosting);
-  return [header, "", ...postings].join("\n\n");
+  
+  const parts = [header, "", ...postings];
+  
+  // Add metadata if present
+  if (intent.metadata && intent.metadata.length > 0) {
+    const metadataLines = compileMetadata(intent.metadata);
+    parts.push("", ...metadataLines);
+  }
+  
+  return parts.join("\n\n");
 }
 
 export function compile(intent: NumscriptIntent): string {

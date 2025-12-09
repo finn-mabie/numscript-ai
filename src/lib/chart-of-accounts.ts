@@ -20,40 +20,41 @@ export type ChartOfAccounts = z.infer<typeof ChartOfAccountsSchema>;
 /**
  * Default example Chart of Accounts
  */
-export const DEFAULT_CHART_YAML = `# Credit Card Issuing - Enfuce Model
-# Complete lifecycle: setup, auth, clearing, billing, settlement
+export const DEFAULT_CHART_YAML = `# Stablecoin Issuance Platform
+# On-ramp (fiat→stablecoin), Off-ramp (stablecoin→fiat)
 
-cardholders:
-  description: "Cardholder accounts"
+psp:
+  description: "Payment Service Provider accounts (assets)"
   paths:
-    available: "cardholder:$id:available"
-    current: "cardholder:$id:current"
-    credit_line: "cardholder:$id:credit_line"
-    pending: "cardholder:$id:pending:$auth_id"
-    billed: "cardholder:$id:billed"
-    billed_invoice: "cardholder:$id:billed:$invoice_id"
-    overdue: "cardholder:$id:overdue"
-    fees_markup: "cardholder:$id:fees:markup"
-    interest_accrued: "cardholder:$id:interest:accrued"
-    interest_posted: "cardholder:$id:interest:posted"
-
-platform:
-  description: "Platform/Issuer accounts"
-  paths:
-    credit_grants: "platform:$platform:credit_grants"
-    revenue: "platform:$platform:revenue"
-    interest: "platform:$platform:interest:$account_id"
-
-schemes:
-  description: "Card scheme accounts (Visa, MC)"
-  paths:
-    main: "schemes:$scheme:main"
+    main: "psp:$psp_id:main"
 
 banks:
-  description: "Bank settlement accounts"
+  description: "Bank reserve accounts (assets)"
   paths:
-    main: "banks:$bank:main"
-    payout: "banks:$bank:payout:$ref"
+    main: "banks:$bank_id:main"
+    withdrawal: "banks:$bank_id:withdrawal:$transfer_ref"
+
+blockchain:
+  description: "Blockchain supply tracking (liabilities)"
+  paths:
+    circulating: "blockchain:$network:circulating"
+    mint_in_flight: "blockchain:$network:mint_in_flight"
+    burn_in_flight: "blockchain:$network:burn_in_flight"
+
+clients:
+  description: "Client stablecoin balances (liabilities)"
+  paths:
+    stablecoin: "clients:$client_id:stablecoin"
+
+platform:
+  description: "Platform operational accounts"
+  paths:
+    pivot: "platform:pivot:stablecoin_issuance"
+    gas_fees: "platform:expenses:gas_fees"
+    payment_fees: "platform:expenses:payment_fees"
+    transaction_fees: "platform:revenue:transaction_fees"
+    backing: "platform:reserves:backing_stablecoins"
+    pending_withdrawal: "platform:reserves:pending_withdrawal"
 
 world:
   description: "Unlimited source"

@@ -33,6 +33,10 @@ ${chartContext}
       "asset": "USD/2",
       "amount": "10000"
     }
+  ],
+  "metadata": [
+    {"key": "transaction_type", "value": "payment"},
+    {"key": "authorization_id", "value": "AUTH-12345"}
   ]
 }
 \`\`\`
@@ -57,34 +61,48 @@ ${chartContext}
 {"destination_type": "simple", "simple_destination": "merchant:123:main"}
 \`\`\`
 
-### 4. Split Destination
-Three types of split rules:
+### 4. Split Destination - TWO DIFFERENT TYPES (cannot mix!)
 
-**Fraction (percentage):**
+**TYPE A: Allotment (percentages) - use for "X% to account"**
 \`\`\`json
-{"target": "platform:fees", "amount_mode": "fraction", "value": "10%"}
+"split_rules": [
+  {"target": "platform:fees", "amount_mode": "fraction", "value": "10%"},
+  {"target": "merchant:main", "amount_mode": "remaining", "value": ""}
+]
 \`\`\`
 
-**Max (capped amount) - USE FOR "CAPPED AT $X":**
-\`\`\`json
-{"target": "user:cashback", "amount_mode": "max", "value": "1000"}
-\`\`\`
-This means: give up to $10 max (1000 cents) to cashback
-
-**Remaining (must be LAST):**
-\`\`\`json
-{"target": "merchant:main", "amount_mode": "remaining", "value": ""}
-\`\`\`
-
-### 5. CAPPED AMOUNTS EXAMPLE
-"Give 5% cashback capped at $10, rest to merchant"
+**TYPE B: Inorder (max caps) - use for "up to $X to account"**
 \`\`\`json
 "split_rules": [
   {"target": "user:cashback", "amount_mode": "max", "value": "1000"},
   {"target": "merchant:main", "amount_mode": "remaining", "value": ""}
 ]
 \`\`\`
-This caps cashback at $10 (1000 cents) regardless of percentage!
+
+⚠️ **CRITICAL: You CANNOT mix "fraction" and "max" in the same split!**
+- Use ONLY fractions (percentages) together, OR
+- Use ONLY max caps together
+- "remaining" can be used with either type
+
+### 5. SPLIT EXAMPLES
+
+**Percentage split:** "Send 80% to merchant, 15% to fees, rest to reserves"
+\`\`\`json
+"split_rules": [
+  {"target": "merchant:main", "amount_mode": "fraction", "value": "80%"},
+  {"target": "platform:fees", "amount_mode": "fraction", "value": "15%"},
+  {"target": "platform:reserves", "amount_mode": "remaining", "value": ""}
+]
+\`\`\`
+
+**Max cap split:** "Up to $10 cashback, up to $5 bonus, rest to merchant"
+\`\`\`json
+"split_rules": [
+  {"target": "user:cashback", "amount_mode": "max", "value": "1000"},
+  {"target": "user:bonus", "amount_mode": "max", "value": "500"},
+  {"target": "merchant:main", "amount_mode": "remaining", "value": ""}
+]
+\`\`\`
 
 ### 6. LIMITED OVERDRAFT EXAMPLE  
 "Allow overdraft up to $200 on credit account"
@@ -98,14 +116,25 @@ This caps cashback at $10 (1000 cents) regardless of percentage!
 \`\`\`
 
 ### 7. Split Rules Order
-1. fraction rules first (percentages)
-2. max rules second (capped amounts)  
-3. remaining MUST be LAST
+1. fraction OR max rules first (but NOT both!)
+2. remaining MUST be LAST
 
 ### 8. Multiple Postings for Complex Flows
 Break complex requests into separate postings:
 - Posting 1: Seed/fund accounts
 - Posting 2: Process transaction with splits
+
+### 9. Transaction Metadata
+Add metadata to track transaction details. Common metadata keys:
+- "transaction_type": Type of transaction (e.g., "payment", "refund", "authorization", "mint", "burn")
+- "authorization_id": Reference ID for authorizations
+- "settlement_ref": Settlement reference number
+- "client_id": Customer/client identifier
+- "mint_tx_hash" / "burn_tx_hash": Blockchain transaction hashes
+- "block_number": Blockchain block number
+- "type": General transaction classification
+
+If the user mentions IDs, references, or wants to track specific data, include relevant metadata.
 
 ## OUTPUT FORMAT
 Output ONLY valid JSON. No markdown code blocks.
